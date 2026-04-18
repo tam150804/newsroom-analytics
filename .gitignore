@@ -17,4 +17,15 @@
 
 # Generated outputs (optional, uncomment if you want to regenerate)
 # outputs/figures/
+# outputs/models/
+# outputs/*.html
+# outputs/*.csv
 # data/raw/ (if you want to keep data private)
+
+# API and server files
+*.pid
+*.sock
+
+# Logs
+logs/
+*.log

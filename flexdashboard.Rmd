@@ -1,0 +1,351 @@
+---
+title: "Newsroom Analytics Dashboard"
+output:
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+    theme: bootstrap
+    source_code: embed
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(tidyverse)
+library(plotly)
+library(DT)
+
+# Load data
+articles <- read_csv("data/raw/articles.csv", show_col_types = FALSE)
+users <- read_csv("data/raw/users.csv", show_col_types = FALSE)
+sessions <- read_csv("data/raw/sessions.csv", show_col_types = FALSE)
+article_events <- read_csv("data/raw/article_events.csv", show_col_types = FALSE)
+ab_test_events <- read_csv("data/raw/ab_test_events.csv", show_col_types = FALSE)
+
+# Prepare engagement data
+engagement_data <- article_events %>%
+  left_join(articles, by = "article_id") %>%
+  left_join(sessions, by = "session_id")
+```
+
+Overview
+=======================================================================
+
+Column {data-width=150}
+-----------------------------------------------------------------------
+
+### Total Pageviews
+```{r}
+valueBox(
+  nrow(article_events),
+  icon = "fa-eye",
+  color = "primary"
+)
+```
+
+### Engaged Reads
+```{r}
+valueBox(
+  sum(article_events$engaged_read),
+  icon = "fa-thumbs-up",
+  color = "success"
+)
+```
+
+### Subscriptions
+```{r}
+valueBox(
+  sum(article_events$subscribed),
+  icon = "fa-star",
+  color = "warning"
+)
+```
+
+### Avg Engagement Rate
+```{r}
+rate <- mean(article_events$engaged_read) * 100
+valueBox(
+  sprintf("%.1f%%", rate),
+  icon = "fa-percent",
+  color = "info"
+)
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Daily Engagement Trend
+```{r}
+daily_trend <- engagement_data %>%
+  mutate(date = as.Date(event_timestamp)) %>%
+  group_by(date) %>%
+  summarise(
+    pageviews = n(),
+    engagement_rate = mean(engaged_read)
+  ) %>%
+  arrange(date)
+
+plot_ly(daily_trend, x = ~date, y = ~engagement_rate, type = 'scatter', mode = 'lines+markers') %>%
+  layout(
+    title = "Daily Engagement Rate",
+    xaxis = list(title = "Date"),
+    yaxis = list(title = "Engagement Rate", tickformat = ".1%")
+  )
+```
+
+### Traffic Source Distribution
+```{r}
+traffic <- sessions %>%
+  count(traffic_source) %>%
+  mutate(percentage = n / sum(n) * 100)
+
+plot_ly(traffic, labels = ~traffic_source, values = ~n, type = 'pie') %>%
+  layout(title = "Traffic Source Distribution")
+```
+
+Article Performance
+=======================================================================
+
+Column {data-width=400}
+-----------------------------------------------------------------------
+
+### Top Articles by Engagement
+```{r}
+top_articles <- engagement_data %>%
+  group_by(title, section) %>%
+  summarise(
+    views = n(),
+    engagement_rate = mean(engaged_read),
+    avg_time = mean(time_on_page_seconds)
+  ) %>%
+  arrange(desc(engagement_rate)) %>%
+  head(10)
+
+plot_ly(top_articles, x = ~engagement_rate, y = ~reorder(title, engagement_rate),
+        type = 'bar', orientation = 'h',
+        text = ~sprintf("%.1f%% engagement<br>%d views", engagement_rate*100, views),
+        hoverinfo = 'text') %>%
+  layout(
+    title = "Top 10 Articles by Engagement",
+    xaxis = list(title = "Engagement Rate", tickformat = ".1%"),
+    yaxis = list(title = "")
+  )
+```
+
+Column {data-width=300}
+-----------------------------------------------------------------------
+
+### Engagement by Section
+```{r}
+section_perf <- engagement_data %>%
+  group_by(section) %>%
+  summarise(
+    avg_engagement = mean(engaged_read),
+    total_views = n()
+  )
+
+plot_ly(section_perf, x = ~section, y = ~avg_engagement, type = 'bar',
+        text = ~sprintf("%.1f%%<br>%d views", avg_engagement*100, total_views),
+        hoverinfo = 'text') %>%
+  layout(
+    title = "Engagement by Section",
+    xaxis = list(title = "Section"),
+    yaxis = list(title = "Avg Engagement", tickformat = ".1%")
+  )
+```
+
+### Article Details Table
+```{r}
+article_summary <- engagement_data %>%
+  group_by(article_id, title, section, author) %>%
+  summarise(
+    views = n(),
+    avg_time = mean(time_on_page_seconds),
+    engagement_rate = mean(engaged_read),
+    subscriptions = sum(subscribed)
+  ) %>%
+  arrange(desc(views))
+
+datatable(
+  article_summary,
+  options = list(pageLength = 10, scrollX = TRUE),
+  colnames = c("ID", "Title", "Section", "Author", "Views", "Avg Time", "Engagement", "Subscriptions")
+) %>%
+  formatPercentage("engagement_rate", 1) %>%
+  formatRound("avg_time", 1)
+```
+
+Audience Behavior
+=======================================================================
+
+Column {data-width=300}
+-----------------------------------------------------------------------
+
+### Device Type Comparison
+```{r}
+device_comp <- engagement_data %>%
+  group_by(device_type) %>%
+  summarise(
+    sessions = n_distinct(session_id),
+    avg_engagement = mean(engaged_read),
+    avg_time = mean(time_on_page_seconds),
+    avg_scroll = mean(scroll_depth_pct)
+  )
+
+plot_ly(device_comp, x = ~device_type, y = ~sessions, type = 'bar', name = 'Sessions') %>%
+  add_trace(y = ~avg_engagement, name = 'Engagement Rate', yaxis = 'y2') %>%
+  layout(
+    title = "Device Type Analysis",
+    xaxis = list(title = "Device Type"),
+    yaxis = list(title = "Sessions"),
+    yaxis2 = list(title = "Engagement Rate", overlaying = "y", side = "right", tickformat = ".1%")
+  )
+```
+
+Column {data-width=400}
+-----------------------------------------------------------------------
+
+### Engagement Metrics by Device
+```{r}
+device_metrics <- engagement_data %>%
+  group_by(device_type) %>%
+  summarise(
+    avg_time = mean(time_on_page_seconds),
+    avg_scroll = mean(scroll_depth_pct),
+    engagement_rate = mean(engaged_read),
+    subscription_rate = mean(subscribed)
+  ) %>%
+  pivot_longer(cols = c(avg_time, avg_scroll, engagement_rate, subscription_rate),
+               names_to = "metric", values_to = "value")
+
+plot_ly(device_metrics, x = ~device_type, y = ~value, color = ~metric, type = 'bar') %>%
+  layout(
+    title = "Engagement Metrics by Device",
+    xaxis = list(title = "Device Type"),
+    yaxis = list(title = "Value"),
+    barmode = 'group'
+  )
+```
+
+### User Journey Analysis
+```{r}
+user_journey <- engagement_data %>%
+  group_by(session_id) %>%
+  summarise(
+    pageviews = n(),
+    engaged_reads = sum(engaged_read),
+    total_time = sum(time_on_page_seconds),
+    max_scroll = max(scroll_depth_pct),
+    subscribed = max(subscribed)
+  ) %>%
+  mutate(
+    engagement_rate = engaged_reads / pageviews,
+    avg_time_per_page = total_time / pageviews
+  )
+
+# Scatter plot of engagement vs pageviews
+plot_ly(user_journey, x = ~pageviews, y = ~engagement_rate,
+        type = 'scatter', mode = 'markers',
+        size = ~avg_time_per_page, color = ~subscribed,
+        text = ~sprintf("Session: %s<br>Pageviews: %d<br>Engagement: %.1f%%",
+                       session_id, pageviews, engagement_rate*100),
+        hoverinfo = 'text') %>%
+  layout(
+    title = "User Journey: Pageviews vs Engagement",
+    xaxis = list(title = "Pageviews per Session"),
+    yaxis = list(title = "Engagement Rate", tickformat = ".1%")
+  )
+```
+
+A/B Testing
+=======================================================================
+
+Column {data-width=250}
+-----------------------------------------------------------------------
+
+### A/B Test Overview
+```{r}
+ab_summary <- ab_test_events %>%
+  group_by(variant) %>%
+  summarise(
+    impressions = sum(impression),
+    clicks = sum(click),
+    ctr = clicks / impressions,
+    engaged_reads = sum(engaged_read),
+    subscriptions = sum(subscription)
+  )
+
+valueBox(
+  sprintf("%.1f%%", ab_summary$ctr[ab_summary$variant == "A"] * 100),
+  "CTR Variant A",
+  icon = "fa-mouse-pointer",
+  color = "primary"
+)
+
+valueBox(
+  sprintf("%.1f%%", ab_summary$ctr[ab_summary$variant == "B"] * 100),
+  "CTR Variant B",
+  icon = "fa-mouse-pointer",
+  color = "success"
+)
+```
+
+### Statistical Significance
+```{r}
+test <- prop.test(
+  x = c(ab_summary$clicks[ab_summary$variant == "A"], ab_summary$clicks[ab_summary$variant == "B"]),
+  n = c(ab_summary$impressions[ab_summary$variant == "A"], ab_summary$impressions[ab_summary$variant == "B"])
+)
+
+significance <- ifelse(test$p.value < 0.05, "Significant", "Not Significant")
+color <- ifelse(test$p.value < 0.05, "success", "warning")
+
+valueBox(
+  significance,
+  paste("p =", format.pval(test$p.value, digits = 3)),
+  icon = "fa-chart-line",
+  color = color
+)
+```
+
+Column {data-width=500}
+-----------------------------------------------------------------------
+
+### A/B Test Results
+```{r}
+ab_long <- ab_summary %>%
+  pivot_longer(cols = c(ctr, engaged_reads, subscriptions),
+               names_to = "metric", values_to = "value") %>%
+  mutate(metric = case_when(
+    metric == "ctr" ~ "Click-Through Rate",
+    metric == "engaged_reads" ~ "Engaged Reads",
+    metric == "subscriptions" ~ "Subscriptions"
+  ))
+
+plot_ly(ab_long, x = ~variant, y = ~value, color = ~metric, type = 'bar') %>%
+  layout(
+    title = "A/B Test Results by Metric",
+    xaxis = list(title = "Variant"),
+    yaxis = list(title = "Value"),
+    barmode = 'group'
+  )
+```
+
+### Test Details
+```{r}
+ab_detailed <- ab_test_events %>%
+  group_by(variant) %>%
+  summarise(
+    impressions = sum(impression),
+    clicks = sum(click),
+    ctr = clicks / impressions,
+    engaged_read_rate = sum(engaged_read) / impressions,
+    subscription_rate = sum(subscription) / impressions
+  ) %>%
+  mutate(across(where(is.numeric), ~sprintf("%.3f", .)))
+
+datatable(
+  ab_detailed,
+  options = list(dom = 't', paging = FALSE),
+  colnames = c("Variant", "Impressions", "Clicks", "CTR", "Engaged Read Rate", "Subscription Rate")
+)
+```
