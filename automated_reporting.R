@@ -149,27 +149,27 @@ output: html_document
 ## Top Performing Articles
 
 ```{r, echo=FALSE}
-knitr::kable(report_data$top_articles, format = "html", table.attr = "class='table table-striped'")
+knitr::kable(report_data$top_articles, format = "html", table.attr = "class=\\"table table-striped\\"")
 ```
 
 ## Traffic Source Breakdown
 
 ```{r, echo=FALSE}
-knitr::kable(report_data$traffic_sources, format = "html", table.attr = "class='table table-striped'",
+knitr::kable(report_data$traffic_sources, format = "html", table.attr = "class=\\"table table-striped\\"",
              col.names = c("Traffic Source", "Sessions", "Percentage"))
 ```
 
 ## Device Performance
 
 ```{r, echo=FALSE}
-knitr::kable(report_data$device_performance, format = "html", table.attr = "class='table table-striped'",
+knitr::kable(report_data$device_performance, format = "html", table.attr = "class=\\"table table-striped\\"",
              col.names = c("Device Type", "Pageviews", "Engagement Rate", "Avg Time on Page"))
 ```
 
 ## Section Performance
 
 ```{r, echo=FALSE}
-knitr::kable(report_data$section_performance, format = "html", table.attr = "class='table table-striped'",
+knitr::kable(report_data$section_performance, format = "html", table.attr = "class=\\"table table-striped\\"",
              col.names = c("Section", "Pageviews", "Engagement Rate", "Subscriptions"))
 ```
 
@@ -192,13 +192,25 @@ knitr::kable(report_data$section_performance, format = "html", table.attr = "cla
 
   # Render to HTML
   html_file <- tempfile(fileext = ".html")
-  rmarkdown::render(rmd_file, output_file = html_file, quiet = TRUE)
+  if (rmarkdown::pandoc_available()) {
+    rmarkdown::render(rmd_file, output_file = html_file, quiet = TRUE)
+    cat("HTML report saved to outputs/", basename(html_file), "\n")
+  } else {
+    cat("Pandoc not available - skipping HTML report generation.\n")
+    cat("Report data is ready for manual processing.\n")
+    html_file <- NULL
+  }
 
   return(html_file)
 }
 
 # Function to send email report
 send_email_report <- function(html_file, report_data) {
+  if (is.null(html_file)) {
+    cat("Skipping email report - no HTML file generated.\n")
+    return()
+  }
+
   # Read HTML content
   html_content <- readLines(html_file)
   html_body <- paste(html_content, collapse = "\n")

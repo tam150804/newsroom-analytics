@@ -71,14 +71,17 @@ generate_data_profile <- function() {
 
   # Create data profile for article_events (largest dataset)
   cat("Generating data profile for article_events...\n")
-  DataExplorer::create_report(
-    article_events,
-    output_file = "outputs/data_quality_report.html",
-    output_dir = "outputs/",
-    report_title = "Newsroom Analytics Data Quality Report"
-  )
-
-  cat("Data profile report saved to outputs/data_quality_report.html\n\n")
+  if (rmarkdown::pandoc_available()) {
+    DataExplorer::create_report(
+      article_events,
+      output_file = "outputs/data_quality_report.html",
+      output_dir = "outputs/",
+      report_title = "Newsroom Analytics Data Quality Report"
+    )
+    cat("Data profile report saved to outputs/data_quality_report.html\n\n")
+  } else {
+    cat("Skipping HTML report: pandoc not found. Install pandoc or RStudio to enable report generation.\n\n")
+  }
 }
 
 # Function to validate data integrity rules

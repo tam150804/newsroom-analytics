@@ -16,7 +16,7 @@ prepare_modeling_data <- function(data) {
     mutate(
       hour_of_day = hour(event_timestamp),
       day_of_week = wday(event_timestamp, label = TRUE),
-      is_weekend = day_of_week %in% c("Sat", "Sun"),
+      is_weekend = as.factor(day_of_week %in% c("Sat", "Sun")),
       time_since_publish = as.numeric(difftime(event_timestamp, publish_date, units = "days")),
       log_word_count = log(word_count + 1),
       log_time_on_page = log(time_on_page_seconds + 1)
@@ -56,6 +56,10 @@ train_engagement_model <- function(data) {
   train_data <- data[train_index, ]
   test_data <- data[-train_index, ]
 
+  # Ensure engaged_read is treated as a classification target
+  train_data <- train_data %>% mutate(engaged_read = as.factor(engaged_read))
+  test_data <- test_data %>% mutate(engaged_read = as.factor(engaged_read))
+
   cat("Training set size:", nrow(train_data), "\n")
   cat("Test set size:", nrow(test_data), "\n\n")
 
@@ -83,13 +87,13 @@ train_engagement_model <- function(data) {
   # Train XGBoost model
   cat("Training XGBoost model...\n")
   train_matrix <- xgb.DMatrix(
-    data = as.matrix(train_data %>% select(-engaged_read, -time_on_page_seconds, -log_time_on_page)),
-    label = as.numeric(train_data$engaged_read)
+    data = model.matrix(~ . -1, data = train_data %>% select(-engaged_read, -time_on_page_seconds, -log_time_on_page)),
+    label = as.numeric(train_data$engaged_read) - 1
   )
 
   test_matrix <- xgb.DMatrix(
-    data = as.matrix(test_data %>% select(-engaged_read, -time_on_page_seconds, -log_time_on_page)),
-    label = as.numeric(test_data$engaged_read)
+    data = model.matrix(~ . -1, data = test_data %>% select(-engaged_read, -time_on_page_seconds, -log_time_on_page)),
+    label = as.numeric(test_data$engaged_read) - 1
   )
 
   xgb_model <- xgb.train(
@@ -106,11 +110,11 @@ train_engagement_model <- function(data) {
 
   # XGBoost predictions
   xgb_pred_prob <- predict(xgb_model, test_matrix)
-  xgb_pred <- ifelse(xgb_pred_prob > 0.5, TRUE, FALSE)
+  xgb_pred <- factor(ifelse(xgb_pred_prob > 0.5, 1, 0), levels = levels(test_data$engaged_read))
   xgb_auc <- auc(roc(test_data$engaged_read, xgb_pred_prob))
 
   cat("XGBoost Results:\n")
-  xgb_confusion <- confusionMatrix(as.factor(xgb_pred), as.factor(test_data$engaged_read))
+  xgb_confusion <- confusionMatrix(xgb_pred, test_data$engaged_read)
   print(xgb_confusion)
   cat("AUC:", xgb_auc, "\n\n")
 
@@ -118,6 +122,10 @@ train_engagement_model <- function(data) {
   cat("Random Forest Feature Importance:\n")
   rf_importance <- importance(rf_model)
   print(rf_importance[order(rf_importance[, "MeanDecreaseGini"], decreasing = TRUE), ])
+
+  # Ensure output directories exist
+  dir.create("outputs/models", recursive = TRUE, showWarnings = FALSE)
+  dir.create("outputs/figures", recursive = TRUE, showWarnings = FALSE)
 
   # Save models
   saveRDS(rf_model, "outputs/models/rf_engagement_model.rds")
@@ -185,9 +193,10 @@ train_time_prediction_model <- function(data) {
 create_model_plots <- function(models, test_data) {
   # ROC curves
   rf_pred_prob <- predict(models$rf_model, test_data, type = "prob")[, 2]
-  xgb_pred_prob <- predict(models$xgb_model, xgb.DMatrix(
-    data = as.matrix(test_data %>% select(-engaged_read, -time_on_page_seconds, -log_time_on_page))
-  ))
+  xgb_test_matrix <- xgb.DMatrix(
+    data = model.matrix(~ . -1, data = test_data %>% select(-engaged_read, -time_on_page_seconds, -log_time_on_page))
+  )
+  xgb_pred_prob <- predict(models$xgb_model, xgb_test_matrix)
 
   rf_roc <- roc(test_data$engaged_read, rf_pred_prob)
   xgb_roc <- roc(test_data$engaged_read, xgb_pred_prob)
